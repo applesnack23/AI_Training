@@ -1,455 +1,240 @@
-from pathlib import Path
-import sys
+"""Conveyor imitation-learning controller with Unity reset handshake.
+
+Python 3.14 / PyModbus 3.16.1 server API as used by the project.
+Unity writes HR0; Python writes HR10.
+"""
+
 import asyncio
+import time
+from pathlib import Path
 
 import joblib
 import pandas as pd
-
-
-# ============================================================
-# Path
-# ============================================================
+from pymodbus.server import ModbusTcpServer
+from pymodbus.simulator import DataType, SimData, SimDevice
 
 BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parent
-
 MODEL_PATH = BASE_DIR / "conveyor_il_model.pkl"
-
-
-# 상위 폴더의 modbus_server.py import
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-
-from modbus_server import (
-    SimData,
-    SimDevice,
-    DataType,
-    ModbusTcpServer,
-)
-
-
-# ============================================================
-# Modbus Setting
-# ============================================================
 
 MODBUS_IP = "127.0.0.1"
 MODBUS_PORT = 1502
-
-# Unity -> Python
+DEVICE_ID = 1
 HR_SENSOR = 0
-
-# Python -> Unity
 HR_COMMAND = 10
-
-
-# ============================================================
-# HR0 Bit
-# ============================================================
 
 BIT_SENSOR01 = 0
 BIT_SENSOR02 = 1
 BIT_WORKPIECE_LOST = 2
-
-
-# ============================================================
-# HR10 Bit
-# ============================================================
-
 BIT_LEFT = 0
 BIT_RIGHT = 1
 BIT_RESET = 2
 
-
-# ============================================================
-# Action
-# ============================================================
-
 ACTION_STOP = 0
 ACTION_LEFT = 1
 ACTION_RIGHT = 2
-
-ACTION_NAMES = {
-    ACTION_STOP: "STOP",
-    ACTION_LEFT: "LEFT",
-    ACTION_RIGHT: "RIGHT",
-}
-
-
-# ============================================================
-# Control Setting
-# ============================================================
+ACTION_NAMES = {0: "STOP", 1: "LEFT", 2: "RIGHT"}
 
 CONTROL_INTERVAL = 0.05
+DEBUG_INTERVAL = 1.0
+RESET_PULSE_SECONDS = 0.2
+RESET_TIMEOUT_SECONDS = 5.0
 
-
-# ============================================================
-# Bit
-# ============================================================
 
 def get_bit(value, bit):
-
     return (value >> bit) & 1
 
 
-# ============================================================
-# Action -> HR10
-# ============================================================
-
 def action_to_command(action):
-
     if action == ACTION_LEFT:
-
-        # HR10 bit0
         return 1 << BIT_LEFT
-
-    elif action == ACTION_RIGHT:
-
-        # HR10 bit1
+    if action == ACTION_RIGHT:
         return 1 << BIT_RIGHT
-
-    else:
-
-        # STOP
-        return 0
+    return 0
 
 
-# ============================================================
-# IL Control
-# ============================================================
+async def read_hr(server, address):
+    values = await server.async_getValues(DEVICE_ID, 3, address, count=1)
+    return int(values[0])
+
+
+async def write_hr(server, address, value):
+    await server.async_setValues(DEVICE_ID, 3, address, [int(value)])
+
 
 async def il_control(server, model):
-
-    print()
-    print("============================================")
+    print("\n============================================")
     print(" IL CONTROL START")
-    print("============================================")
-    print()
+    print("============================================\n")
 
-    # 시작 위치는 Sensor01이라고 가정
     last_sensor = 1
-
     previous_state = None
     previous_action = None
-
-    while True:
-
-        try:
-
-            # =================================================
-            # HR0 Read
-            # Unity -> Python
-            # =================================================
-
-            values = await server.async_getValues(
-                3,
-                HR_SENSOR,
-                count=1,
-            )
-
-            hr0 = values[0]
-
-
-            # =================================================
-            # Decode Sensor
-            # =================================================
-
-            sensor01 = get_bit(
-                hr0,
-                BIT_SENSOR01,
-            )
-
-            sensor02 = get_bit(
-                hr0,
-                BIT_SENSOR02,
-            )
-
-            workpiece_lost = get_bit(
-                hr0,
-                BIT_WORKPIECE_LOST,
-            )
-
-
-            # =================================================
-            # Workpiece Lost
-            # =================================================
-
-            if workpiece_lost:
-
-                await server.async_setValues(
-                    3,
-                    HR_COMMAND,
-                    [0],
-                )
-
-                if previous_action != ACTION_STOP:
-
-                    print(
-                        "[FAIL] Workpiece Lost -> STOP"
-                    )
-
-                previous_action = ACTION_STOP
-
-                await asyncio.sleep(
-                    CONTROL_INTERVAL
-                )
-
-                continue
-
-
-            # =================================================
-            # Last Sensor
-            # =================================================
-
-            if sensor01 == 1:
-
-                last_sensor = 1
-
-            elif sensor02 == 1:
-
-                last_sensor = 2
-
-
-            # =================================================
-            # AI Input
-            # =================================================
-
-            state = [
-                sensor01,
-                sensor02,
-                last_sensor,
-            ]
-
-
-            state_df = pd.DataFrame(
-                [state],
-                columns=[
-                    "Sensor01",
-                    "Sensor02",
-                    "LastSensor",
-                ],
-            )
-
-
-            # =================================================
-            # IL Prediction
-            # =================================================
-
-            prediction = model.predict(
-                state_df
-            )
-
-            action = int(
-                prediction[0]
-            )
-
-
-            # =================================================
-            # Action -> HR10
-            # =================================================
-
-            command = action_to_command(
-                action
-            )
-
-
-            # =================================================
-            # HR10 Write
-            # Python -> Unity
-            # =================================================
-
-            await server.async_setValues(
-                3,
-                HR_COMMAND,
-                [command],
-            )
-
-
-            # =================================================
-            # Log
-            # =================================================
-
-            if (
-                state != previous_state
-                or action != previous_action
-            ):
-
-                print(
-                    f"[STATE] "
-                    f"S1={sensor01} "
-                    f"S2={sensor02} "
-                    f"Last={last_sensor} "
-                    f"-> "
-                    f"AI={ACTION_NAMES.get(action, action)} "
-                    f"HR10={command}"
-                )
-
-                previous_state = state.copy()
-                previous_action = action
-
-
-            await asyncio.sleep(
-                CONTROL_INTERVAL
-            )
-
-
-        except asyncio.CancelledError:
-
-            raise
-
-
-        except Exception as e:
-
-            print(
-                f"[CONTROL ERROR] {e}"
-            )
-
-            await asyncio.sleep(
-                0.5
-            )
-
-
-# ============================================================
-# Main
-# ============================================================
-
-async def main():
-
-    print()
-    print("============================================")
-    print(" CONVEYOR IMITATION LEARNING")
-    print(" MODBUS TCP SERVER")
-    print("============================================")
-    print()
-
-
-    # ========================================================
-    # Model Load
-    # ========================================================
-
-    if not MODEL_PATH.exists():
-
-        print("[ERROR] IL Model not found.")
-        print()
-        print(MODEL_PATH)
-        print()
-        print("Run il_train.py first.")
-
-        return
-
-
-    print("[MODEL] Loading...")
-
-    model = joblib.load(
-        MODEL_PATH
-    )
-
-    print("[MODEL] Loaded")
-    print(MODEL_PATH)
-
-
-    # ========================================================
-    # Modbus Data
-    # ========================================================
-
-    sim_data = SimData(
-        block_type=DataType.REGISTERS,
-        address=0,
-        count=20,
-        default_value=0,
-    )
-
-
-    # ========================================================
-    # Modbus Device
-    # ========================================================
-
-    device = SimDevice(
-        blocks=[sim_data],
-    )
-
-
-    # ========================================================
-    # Modbus Server
-    # ========================================================
-
-    server = ModbusTcpServer(
-        device=device,
-        address=(
-            MODBUS_IP,
-            MODBUS_PORT,
-        ),
-    )
-
-
-    print()
-    print(
-        f"[MODBUS] Server Starting "
-        f"{MODBUS_IP}:{MODBUS_PORT}"
-    )
-
-    print()
-    print(
-        "[MODBUS] Waiting for Unity Client..."
-    )
-
-
-    # ========================================================
-    # IL Control Task
-    # ========================================================
-
-    control_task = asyncio.create_task(
-        il_control(
-            server,
-            model,
-        )
-    )
-
+    previous_hr0 = None
+    last_debug_time = 0.0
+
+    # normal / reset_pulse / wait_clear / reset_failed
+    reset_state = "normal"
+    reset_pulse_deadline = 0.0
+    reset_timeout_deadline = 0.0
 
     try:
+        while True:
+            try:
+                hr0 = await read_hr(server, HR_SENSOR)
+                sensor01 = get_bit(hr0, BIT_SENSOR01)
+                sensor02 = get_bit(hr0, BIT_SENSOR02)
+                workpiece_lost = get_bit(hr0, BIT_WORKPIECE_LOST)
+                now = time.monotonic()
 
-        # Modbus TCP Server 실행
-        await server.serve_forever()
+                if hr0 != previous_hr0 or now - last_debug_time >= DEBUG_INTERVAL:
+                    print(
+                        f"[DEBUG] HR0={hr0} BIN={hr0:016b} "
+                        f"S1={sensor01} S2={sensor02} LOST={workpiece_lost} "
+                        f"RESET_STATE={reset_state}",
+                        flush=True,
+                    )
+                    previous_hr0 = hr0
+                    last_debug_time = now
 
+                if reset_state == "normal" and workpiece_lost:
+                    print("[FAIL] Workpiece Lost -> STOP + RESET", flush=True)
+                    await write_hr(server, HR_COMMAND, 0)
+                    await write_hr(server, HR_COMMAND, 1 << BIT_RESET)
+                    reset_state = "reset_pulse"
+                    reset_pulse_deadline = now + RESET_PULSE_SECONDS
+                    reset_timeout_deadline = now + RESET_TIMEOUT_SECONDS
+                    previous_action = ACTION_STOP
+                    previous_state = None
 
-    except KeyboardInterrupt:
+                elif reset_state == "reset_pulse":
+                    if now >= reset_pulse_deadline:
+                        await write_hr(server, HR_COMMAND, 0)
+                        reset_state = "wait_clear"
+                        print("[RESET] Pulse released; waiting for Lost=0", flush=True)
 
-        print()
-        print("[STOP] Ctrl+C")
+                elif reset_state == "wait_clear":
+                    # Motor must remain stopped while waiting for Unity reset.
+                    if not workpiece_lost:
+                        last_sensor = 1
+                        previous_state = None
+                        previous_action = None
+                        reset_state = "normal"
+                        print("[RESET] Complete -> resume AI control", flush=True)
+                    elif now >= reset_timeout_deadline:
+                        await write_hr(server, HR_COMMAND, 0)
+                        reset_state = "reset_failed"
+                        print(
+                            "[RESET ERROR] Unity did not clear WorkpieceLost "
+                            "within timeout. Motor remains STOP.",
+                            flush=True,
+                        )
 
+                elif reset_state == "reset_failed":
+                    # No repeated reset pulses: inspect Unity mapping/reset logic.
+                    if not workpiece_lost:
+                        last_sensor = 1
+                        previous_state = None
+                        previous_action = None
+                        reset_state = "normal"
+                        print("[RESET] Lost cleared -> resume AI control", flush=True)
 
+                if reset_state != "normal":
+                    await asyncio.sleep(CONTROL_INTERVAL)
+                    continue
+
+                if sensor01:
+                    last_sensor = 1
+                elif sensor02:
+                    last_sensor = 2
+
+                state = [sensor01, sensor02, last_sensor]
+                state_df = pd.DataFrame(
+                    [state], columns=["Sensor01", "Sensor02", "LastSensor"]
+                )
+                action = int(model.predict(state_df)[0])
+                if action not in ACTION_NAMES:
+                    raise ValueError(f"Invalid model action: {action}")
+
+                command = action_to_command(action)
+                await write_hr(server, HR_COMMAND, command)
+
+                if state != previous_state or action != previous_action:
+                    print(
+                        f"[STATE] S1={sensor01} S2={sensor02} "
+                        f"Last={last_sensor} -> AI={ACTION_NAMES[action]} "
+                        f"HR10={command}",
+                        flush=True,
+                    )
+                    previous_state = state.copy()
+                    previous_action = action
+
+                await asyncio.sleep(CONTROL_INTERVAL)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[CONTROL ERROR] {exc}", flush=True)
+                try:
+                    await write_hr(server, HR_COMMAND, 0)
+                except Exception as stop_exc:
+                    print(f"[STOP ERROR] {stop_exc}", flush=True)
+                await asyncio.sleep(0.5)
     finally:
-
-        control_task.cancel()
-
         try:
-
-            await control_task
-
-        except asyncio.CancelledError:
-
-            pass
+            await write_hr(server, HR_COMMAND, 0)
+        except Exception as exc:
+            print(f"[STOP ERROR] {exc}", flush=True)
 
 
-        print()
-        print("============================================")
+async def main():
+    print("\n============================================")
+    print(" CONVEYOR IMITATION LEARNING")
+    print(" MODBUS TCP SERVER + AUTO RESET")
+    print("============================================\n")
+
+    if not MODEL_PATH.exists():
+        print(f"[ERROR] Model not found: {MODEL_PATH}")
+        print("Run il_train.py first.")
+        return
+
+    print("[MODEL] Loading...")
+    model = joblib.load(MODEL_PATH)
+    print(f"[MODEL] Loaded: {MODEL_PATH}")
+
+    device = SimDevice(
+        DEVICE_ID,
+        SimData(0, datatype=DataType.REGISTERS, values=[0] * 50),
+    )
+    server = ModbusTcpServer(
+        device,
+        address=(MODBUS_IP, MODBUS_PORT),
+    )
+    control_task = None
+    server_started = False
+
+    try:
+        print(f"[MODBUS] Starting {MODBUS_IP}:{MODBUS_PORT}")
+        await server.serve_forever(background=True)
+        server_started = True
+        print("[MODBUS] Server listening.")
+        control_task = asyncio.create_task(il_control(server, model))
+        await control_task
+    finally:
+        if control_task is not None:
+            control_task.cancel()
+            try:
+                await control_task
+            except asyncio.CancelledError:
+                pass
+        if server_started:
+            await server.shutdown()
+        print("\n============================================")
         print(" IL SERVER FINISHED")
         print("============================================")
 
 
-# ============================================================
-# Entry
-# ============================================================
-
 if __name__ == "__main__":
-
     try:
-
-        asyncio.run(
-            main()
-        )
-
+        asyncio.run(main())
     except KeyboardInterrupt:
-
-        print()
-        print("[STOP] IL Server")
+        print("\n[STOP] IL Server")
