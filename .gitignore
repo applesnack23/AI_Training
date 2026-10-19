@@ -1,0 +1,61 @@
+# ==========================================================
+# AI_Training 저장소 - 올릴 것만 허용(화이트리스트)
+# 올리는 대상: ConveyorURP 공유용 소스 + 빌드 zip 3종,
+#             Model, PLC, AI_Training
+# ==========================================================
+
+# 1) 루트는 기본적으로 모두 제외
+/*
+
+# 2) 루트에서 올릴 것
+!/.gitignore
+!/README.md
+!/PROJECT_MAP.md
+!/AGENTS.md
+!/Model/
+!/PLC/
+!/AI_Training/
+!/ConveyorURP/
+!/교안/
+
+# ----------------------------------------------------------
+# ConveyorURP: Unity 프로젝트 공유에 필요한 것 + 빌드 zip
+# ----------------------------------------------------------
+/ConveyorURP/*
+!/ConveyorURP/Assets/
+!/ConveyorURP/Packages/
+!/ConveyorURP/ProjectSettings/
+!/ConveyorURP/.vsconfig
+!/ConveyorURP/BuildWin.zip
+!/ConveyorURP/BuildUbuntu.zip
+!/ConveyorURP/BuildMac.app.zip
+/ConveyorURP/Assets/_Recovery/
+
+# ----------------------------------------------------------
+# AI_Training: 가상환경, 예전 빌드 제외
+# ----------------------------------------------------------
+/AI_Training/.cvenv/
+/AI_Training/BuildLinux/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+
+# ----------------------------------------------------------
+# PLC: CODESYS 컴파일 산출물·개인 설정·로그 제외
+# ----------------------------------------------------------
+/PLC/*.bootinfo
+/PLC/*.bootinfo_guids
+/PLC/*.compileinfo
+/PLC/*.precompilecache
+/PLC/*.opt
+/PLC/*.log
+
+# ----------------------------------------------------------
+# 공통
+# ----------------------------------------------------------
+*.bak
+.DS_Store
+Thumbs.db
