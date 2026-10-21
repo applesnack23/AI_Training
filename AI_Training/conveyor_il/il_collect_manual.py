@@ -388,14 +388,12 @@ async def main():
             # Lost 상태는 정상 Expert 동작이 아니므로 제외
             # =================================================
 
-            if workpiece_lost == 0:
-
-                data.append([
-                    sensor01,
-                    sensor02,
-                    last_sensor,
-                    action,
-                ])
+            data.append([
+                sensor01,
+                sensor02,
+                last_sensor,
+                action,
+            ])
 
             # =================================================
             # Console
