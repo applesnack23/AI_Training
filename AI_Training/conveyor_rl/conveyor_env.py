@@ -54,6 +54,7 @@ class ConveyorEnv(gym.Env):
         self.step_time = step_time
         self.reset_wait = reset_wait
         self.max_steps = max_steps
+        # None 이면 「계속 왕복」 학습: 성공 종료 없음, max_steps 에서 벌점 없이 끊기만 함
         self.target_round_trips = target_round_trips
 
         # STOP 행동에 대한 추가 페널티
@@ -351,7 +352,8 @@ class ConveyorEnv(gym.Env):
             # ================================================
 
             if (
-                self.round_trip_count
+                self.target_round_trips is not None
+                and self.round_trip_count
                 >= self.target_round_trips
             ):
 
@@ -376,10 +378,21 @@ class ConveyorEnv(gym.Env):
                 and not terminated
             ):
 
-                reward = -5.0
                 truncated = True
 
                 self._set_action(0)
+
+                if self.target_round_trips is not None:
+                    # 3 회 왕복 학습: 시간 안에 못 끝냄 = 벌점
+                    reward = -5.0
+                else:
+                    # 계속 왕복 학습: 실패가 아니라 시간 끝 (벌점 없음)
+                    print(
+                        "[EPISODE END] "
+                        f"RoundTrip={self.round_trip_count} "
+                        f"Step={self.step_count}",
+                        flush=True,
+                    )
 
         self.prev_sensor01 = self.sensor01
         self.prev_sensor02 = self.sensor02

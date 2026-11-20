@@ -8,6 +8,15 @@ from pathlib import Path
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 
+# TensorBoard 에 time/fps(초당 걸음 수) 를 남기지 않음 — 학습 결과와 관계없는 속도 정보
+from stable_baselines3.common import logger as _sb3_logger
+_orig_record = _sb3_logger.Logger.record
+def _record_no_fps(self, key, value, exclude=None):
+    if key == "time/fps":
+        exclude = ("tensorboard",)          # 터미널 표시는 그대로, TensorBoard 기록만 뺌
+    return _orig_record(self, key, value, exclude)
+_sb3_logger.Logger.record = _record_no_fps
+
 
 # ============================================================
 # Path
@@ -17,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 
 MODEL_PATH = BASE_DIR / "ppo_conveyor_20k"
+MODEL_LOWQ_PATH = BASE_DIR / "ppo_conveyor_8x8"
 LOG_DIR = BASE_DIR / "logs"
 
 
@@ -175,61 +185,11 @@ env = Monitor(
 # PPO Model
 # ============================================================
 
-model = PPO(
-
-    # --------------------------------------------------------
-    # Policy
-    # --------------------------------------------------------
-
-    policy="MlpPolicy",
-
-
-    # --------------------------------------------------------
-    # Environment
-    # --------------------------------------------------------
-
-    env=env,
-
-
-    # --------------------------------------------------------
-    # Console Log
-    # --------------------------------------------------------
-
-    verbose=1,
-
-
-    # --------------------------------------------------------
-    # PPO Rollout
-    # --------------------------------------------------------
-
-    n_steps=256,
-
-
-    # --------------------------------------------------------
-    # PPO Batch
-    # --------------------------------------------------------
-
-    batch_size=64,
-
-
-    # --------------------------------------------------------
-    # Discount Factor
-    # --------------------------------------------------------
-
-    gamma=0.99,
-
-
-    # --------------------------------------------------------
-    # Learning Rate
-    # --------------------------------------------------------
-
-    learning_rate=0.0003,
-
-
-    # --------------------------------------------------------
-    # TensorBoard Log
-    # --------------------------------------------------------
-
+model = PPO(policy="MlpPolicy", env=env,
+    # 인공신경망 8x8 로 수정하기 위해 추가
+    policy_kwargs=dict(net_arch=dict(pi=[8, 8], vf=[8, 8])),
+    n_steps=256, batch_size=64, gamma=0.99,
+    learning_rate=0.0003, verbose=1,
     tensorboard_log=str(
         LOG_DIR
     ),
@@ -307,10 +267,10 @@ try:
 
     # ========================================================
     # Model Save
+    # HIGH QUILITY = MODEL_PATH, LOW QUALITY = MODEL_LOWQ_PATH
     # ========================================================
-
     model.save(
-        str(MODEL_PATH)
+        str(MODEL_LOWQ_PATH)
     )
 
 
@@ -320,7 +280,7 @@ try:
     print("========================================")
     print()
 
-    print(f"Model Saved : {MODEL_PATH}.zip")
+    print(f"Model Saved : {MODEL_LOWQ_PATH}.zip")
 
     print(f"Log Saved   : {LOG_DIR}")
 

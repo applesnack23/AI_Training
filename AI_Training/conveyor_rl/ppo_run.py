@@ -52,7 +52,7 @@ BIT_RESET = 2
 # ============================================================
 
 CONTROL_CYCLE = 0.1
-TARGET_ROUND_TRIPS = 3
+TARGET_ROUND_TRIPS = 3        # 0 이면 멈추지 않고 계속 왕복 (Ctrl+C 로 끝)
 
 RESET_PULSE_TIME = 0.1
 RESET_WAIT_TIME = 0.5
@@ -373,7 +373,8 @@ async def rl_control_loop(model):
         # ====================================================
 
         if (
-            round_trip_count
+            TARGET_ROUND_TRIPS > 0
+            and round_trip_count
             >= TARGET_ROUND_TRIPS
         ):
 

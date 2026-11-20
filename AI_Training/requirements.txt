@@ -1,0 +1,10 @@
+# PART 07 AI_Training 패키지 목록 (가상환경 .venv 안에서)
+# 사용법:  pip install -r requirements.txt
+# 버전은 집필 PC 에서 동작을 확인한 것. 수업 PC 에서 다시 확인 후 pip freeze 로 바꿔 둘 것
+numpy==2.5.4
+pandas==3.0.6
+scikit-learn==1.9.1
+gymnasium==1.4.0
+stable-baselines3==2.9.0
+tensorboard==2.21.0
+pymodbus==3.16.1
